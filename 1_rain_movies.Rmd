@@ -3,6 +3,8 @@ title: "Rain Movies"
 author: "Matthew Ross"
 date: "11/7/2019"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 # Using R to make movies
@@ -22,6 +24,7 @@ library(lubridate)
 library(ggthemes)
 library(tmap)
 library(sf)
+library(av)
 theme_set(theme_few()) # Set ggplot theme
 
 
@@ -39,7 +42,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 co_stations <- riem_stations(network = 'CO_ASOS')
 
-#View(co_stations)
+#view(co_stations)
 
 stations <- c('AFF', 'FNL')
 
@@ -56,7 +59,7 @@ af_p <- riem_measures(station='AFF',date_start = '2018-10-01',
 fc <- riem_measures(station='FNL',date_start = '2018-10-01',
                       date_end = '2019-09-30')
 
-View(fc)
+
 
 ```
 
@@ -138,7 +141,7 @@ tm_shape(co) +
   tm_shape(co_elev) +
   tm_raster(style='cont',palette = 'Greens') + 
   tm_shape(sf_p) + 
-  tm_dots(col='station',size=3,palette=c('red','white'))
+  tm_dots(col='station',size=3,palette=c('red','white', "blue"))
 
 ```
 
@@ -165,7 +168,7 @@ basemap <- tm_shape(co) +
 full_dates <- unique(sf_p$date)
 
 sequence <- 1:length(full_dates)
-saveVideo({
+saveGIF({
   for(i in sequence){
   sub_sf <- sf_p %>%
     filter(date == full_dates[i]) %>%
@@ -187,7 +190,7 @@ saveVideo({
                         col=c('red','white'),
                         title='Station'))
   }
-},movie.name = 'precip_flash.mp4',
+},movie.name = 'precip_flash.gif',
   interval=0.05,
   ani.width=1000,
   ani.height=800)
@@ -227,11 +230,20 @@ stations
 
 
 ```{r, eval=F}
+
+af_p <- riem_measures(station='AFF',date_start = '2018-10-01',
+                      date_end = '2019-09-30')
+
+
+fc <- riem_measures(station='FNL',date_start = '2018-10-01',
+                      date_end = '2019-09-30')
+
+
+
 load('DailyP.RData')
 
 daily_sf <- daily_p %>%
   st_as_sf(.,coords=c('lon','lat'),crs=4326,remove=F)
-
 
 
 
@@ -271,16 +283,133 @@ saveVideo({
 ```
 
 
-
 # In Class work.
 
-## Make a video of mean temperature differences for the full Colorado dataset
+## GGanimate
+
+Make a video showing the correlation between Air Force Academy and Fort Collins
+between the min, mean, and max temps. The movie should cover the full year. 
+
+```{r}
+
+p2 <- ggplot(daily_p,aes(x=date,y=mean_temp,color=station,group=station)) + 
+  geom_line() + 
+  geom_point() +
+  labs(title = '100 mile temp diff', x='Date',y= 'Mean Temp (f)') + 
+  transition_reveal(date) + 
+  scale_color_few()
+
+
+animate(p2, nframes=nrow(daily_p))
+
+precip_long <- daily_p %>%
+  gather(., "measurement", "value", c(5:7))
+
+slice_q1_temp <- precip_long %>%
+  group_by(station)
+
+q1_temp <- ggplot(slice_q1_temp, aes(x=date, y = value, color = measurement, group = station)) +
+  geom_line()+
+  geom_point()+
+  facet_wrap(~station)+
+  transition_reveal(date)+
+  scale_color_few()
+
+animate(q1_temp, nframes = nrow(slice_q1_temp))
+
+```
+
+
+
+## (Animation package)
+
+Make a video of mean temperature differences for the full Colorado dataset
 (you need to download this [here](https://www.dropbox.com/s/s7zt18elgoh8q2b/DailyP.RData?dl=0)) first.
 
 The video should look similar to the one above, but I want you to choose your own 
 style (change the background, add other layers (like counties or cities)), etc...
 
 ```{r}
-load('DailyP.RData')
+
+#load('DailyP.RData')
+
+#riem_networks() # look for network names
+
+co_stations <- riem_stations(network = 'CO_ASOS')
+
+#view(co_stations)
+
+mil_stations <- c('AFF', 'BKF', "FCS", "SHM")
+
+#Download data from CO front range military bases
+
+buck_afb <- riem_measures(station='BKF',date_start = '2018-10-01',
+                      date_end = '2019-09-30')
+
+fort_cars <- riem_measures(station='FCS',date_start = '2018-10-01',
+                      date_end = '2019-09-30')
+
+af_acad <- riem_measures(station='AFF',date_start = '2018-10-01',
+                      date_end = '2019-09-30')
+
+#Merge datasets into one and create temperature min max and mean - create tibble
+
+military_daily_p <- af_acad %>% 
+  bind_rows(af_acad,
+            buck_afb,
+            fort_cars) %>%
+  mutate(date = as.Date(valid)) %>%
+  group_by(date, station, lon, lat) %>%
+  summarize(mean_temp = mean(tmpf,na.rm=T),
+            min_temp = min(tmpf,na.rm=T),
+            max_temp = max(tmpf,na.rm=T),
+            daily_p = sum(p01i,na.rm=T)) %>%
+  as.data.frame() %>%
+  as_tibble()
+
+
+
+#Make military bases spatial points
+
+military_daily_sf <- military_daily_p %>%
+  st_as_sf(.,coords=c('lon','lat'),crs=4326,remove=F)
+
+
+
+military_full_dates <- unique(military_daily_sf$date)
+
+#use for end loop: 
+
+military_sequence <- 1:length(military_full_dates)
+saveGIF({
+  for(i in mil_sequence){
+  military_sub_sf <- military_daily_sf %>%
+    filter(date == military_full_dates[i]) %>%
+    filter(daily_p > 0)
+
+
+  if(nrow(mil_sub_sf) > 0){
+  mililitary_finalmap <- basemap + tm_shape(military_sub_sf) + 
+    tm_dots(title.size='Daily Precip @ Military Bases (in)',
+            col='lon',
+            size='daily_p',
+            style='cont',
+            palette='Oranges',
+            legend.show = F,
+            size.max=19,
+            scale=3.5,
+            sizes.legend=c(0,1,5,10,20))
+  }else{military_finalmap <- basemap}
+  print(military_finalmap + 
+          tm_layout(title=military_full_dates[i],
+        legend.position=c(0.7,0.2)))
+  }
+},movie.name = 'precip_flash_military_bases.mp4',
+  interval=0.12,
+  ani.width=1000,
+  ani.height=800)
+
 ```
+
+
 
